@@ -20,13 +20,14 @@ checkMinVersion();
 
 const $$ = require('gulp-load-plugins')();
 const applyConfig = require('./build-system/tasks/prepend-global/index.js').applyConfig;
-const babelify = require('babelify');
+const babel = require('babelify');
 const browserify = require('browserify');
 const buffer = require('vinyl-buffer');
 const cleanupBuildDir = require('./build-system/tasks/compile').cleanupBuildDir;
 const closureCompile = require('./build-system/tasks/compile').closureCompile;
 const colors = require('ansi-colors');
 const createCtrlcHandler = require('./build-system/ctrlcHandler').createCtrlcHandler;
+const exec = require('./build-system/exec').exec;
 const exitCtrlcHandler = require('./build-system/ctrlcHandler').exitCtrlcHandler;
 const fs = require('fs-extra');
 const gulp = $$.help(require('gulp'));
@@ -79,6 +80,7 @@ declareExtension('amp-ad-network-adsense-impl', 0.1);
 declareExtension('amp-ad-network-adzerk-impl', 0.1);
 declareExtension('amp-ad-network-doubleclick-impl', 0.1);
 declareExtension('amp-ad-network-fake-impl', 0.1);
+declareExtension('amp-ad-network-purch-impl', 0.1);
 declareExtension('amp-ad-network-triplelift-impl', 0.1);
 declareExtension('amp-ad-network-cloudflare-impl', 0.1);
 declareExtension('amp-ad-network-gmossp-impl', 0.1);
@@ -164,7 +166,6 @@ declareExtension('amp-story', '1.0', {
   hasCss: true,
   cssBinaries: [
     'amp-story-bookend',
-    'amp-story-consent',
     'amp-story-hint',
     'amp-story-unsupported-browser-layer',
     'amp-story-viewport-warning-layer',
@@ -819,6 +820,27 @@ function performBuild(watch) {
 }
 
 /**
+ * @param {boolean} compiled
+ */
+function checkBinarySize(compiled) {
+  const file = compiled ? './dist/v0.js' : './dist/amp.js';
+  const size = compiled ? '77.05KB' : '336.66KB';
+  const cmd = `npx bundlesize -f "${file}" -s "${size}"`;
+  log(green('Running ') + cyan(cmd) + green('...\n'));
+  const p = exec(cmd);
+  if (p.status != 0) {
+    log(red('ERROR:'), cyan('bundlesize'), 'found that amp.js/v0.js has ' +
+        'exceeded its size cap. This is part of a new effort to reduce ' +
+        'AMP\'s binary size (#14392). Please contact @choumx or @jridgewell ' +
+        'for assistance.');
+    // Terminate Travis builds on failure.
+    if (process.env.TRAVIS) {
+      process.exit(p.status);
+    }
+  }
+}
+
+/**
  * Enables watching for file changes in css, extensions.
  * @return {!Promise}
  */
@@ -833,7 +855,9 @@ function watch() {
  */
 function build() {
   const handlerProcess = createCtrlcHandler('build');
-  return performBuild().then(() => exitCtrlcHandler(handlerProcess));
+  return performBuild()
+      .then(() => checkBinarySize(/* compiled */ false))
+      .then(() => exitCtrlcHandler(handlerProcess));
 }
 
 /**
@@ -885,7 +909,9 @@ function dist() {
         if (argv.fortesting) {
           return enableLocalTesting(minified3pTarget);
         }
-      }).then(() => exitCtrlcHandler(handlerProcess));
+      })
+      .then(() => checkBinarySize(/* compiled */ true))
+      .then(() => exitCtrlcHandler(handlerProcess));
 }
 
 /**
@@ -1114,10 +1140,8 @@ function compileJs(srcDir, srcFilename, destDir, options) {
         });
   }
 
-  const startTime = Date.now();
   let bundler = browserify(entryPoint, {debug: true})
-      .transform(babelify, {
-        compact: false,
+      .transform(babel, {
         presets: [
           ['env', {
             targets: {
@@ -1125,9 +1149,6 @@ function compileJs(srcDir, srcFilename, destDir, options) {
             },
           }],
         ],
-      })
-      .once('transform', () => {
-        endBuildStep('Transformed', srcFilename, startTime);
       });
   if (options.watch) {
     bundler = watchify(bundler);
@@ -1156,11 +1177,8 @@ function compileJs(srcDir, srcFilename, destDir, options) {
     return toPromise(
         bundler.bundle()
             .on('error', function(err) {
-              let message = err;
-              if (err.stack) {
-                // Drop the node_modules call stack, which begins with '    at'.
-                message = err.stack.replace(/    at[^]*/, '').trim();
-              }
+              // Drop the node_modules call stack, which begins with '    at'.
+              const message = err.stack.replace(/    at[^]*/, '').trim();
               console.error(red(message));
               if (failOnError) {
                 process.exit(1);

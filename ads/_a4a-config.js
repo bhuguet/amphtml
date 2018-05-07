@@ -34,6 +34,10 @@ import {
   tripleliftIsA4AEnabled,
 } from
   '../extensions/amp-ad-network-triplelift-impl/0.1/triplelift-a4a-config';
+import {
+  purchIsA4AEnabled,
+} from
+  '../extensions/amp-ad-network-purch-impl/0.1/purch-a4a-config';
 
 /**
  * Registry for A4A (AMP Ads for AMPHTML pages) "is supported" predicates.
@@ -62,6 +66,7 @@ export function getA4ARegistry() {
       'triplelift': tripleliftIsA4AEnabled,
       'cloudflare': cloudflareIsA4AEnabled,
       'gmossp': gmosspIsA4AEnabled,
+      'purch': purchIsA4AEnabled,
       'fake': () => true,
       // TODO: Add new ad network implementation "is enabled" functions here.  Note:
       // if you add a function here that requires a new "import", above, you'll
